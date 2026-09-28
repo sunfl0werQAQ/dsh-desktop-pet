@@ -1,0 +1,53 @@
+大肥鱼桌宠 · 本地端 —— 第三方内容归属说明（NOTICE）
+================================================================
+
+本仓库包含来自以下上游项目的内容，特此声明并致谢。
+
+----------------------------------------------------------------
+【dsh-pet】
+  仓库   : https://github.com/PC2005-cloud/dsh-pet
+  许可   : MIT License
+  版权人 : Copyright (c) 2026 powerycy
+----------------------------------------------------------------
+
+本仓库包含的、来自该项目的文件（**原样复制，未作任何修改**）：
+
+  app/main.js               Electron 主进程（透明置顶窗口、托盘之外的全部主进程逻辑）
+  app/index.html            渲染页
+  app/preload.js            渲染端 ↔ 主进程桥
+  app/renderer.js           渲染启动入口（配置加载 / 精灵装配）
+  app/sprite.js             宠物精灵：动画链、拖拽、物理、右键菜单
+  app/events.js             事件联动（余额 / 碎碎念 / 工作状态）
+  app/constants.js          BASE / 视口 / 端点常量
+  app/shared-core.js        src/shared 的构建产物（纯逻辑：物理、选择器、菜单）
+  app/host-liveness.js      宿主存活判定
+  app/pointer-target.js     点击穿透判定
+  app/assets/webm/*.webm    106 个 VP9-Alpha 透明动画素材
+  app/assets/fonts/*.ttf    上首软糖体
+  app/assets/pic/*.png      光标与通知图标
+  app/assets/memes/*.png    表情包
+  app/assets/config.jsonc   默认行为配置
+
+----------------------------------------------------------------
+【本仓库新增】同样以 MIT License 发布（见 LICENSE）
+----------------------------------------------------------------
+
+  app/bootstrap.js          独立运行启动器
+                            （本地 HTTP 服务 / 环境变量注入 / 系统托盘 / DSH 优先守卫）
+  app/pets.json             独立版宠物配置
+  app/package.json          Electron 应用入口（main 指向 bootstrap.js）
+  使用说明.txt               面向最终用户的中文说明
+  setup.ps1                 一键下载 Electron 并组装
+  README.md / LICENSE / NOTICE / .gitignore
+
+----------------------------------------------------------------
+【声明】
+----------------------------------------------------------------
+
+  本仓库是 dsh-pet 的**衍生作品（derivative work）**，不是官方项目，
+  与上游作者无从属关系。原始著作权归其作者所有。
+
+  我们仅在 MIT 许可允许的范围内再分发，并完整保留其版权声明。
+  上游的 helper 主进程与渲染端代码一行未改；新增部分只做「脱离 DSH 独立运行」的启动引导。
+
+  若上游作者对本仓库有任何异议，请通过 Issue 联系，我们会立即调整或撤下。

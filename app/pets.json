@@ -1,0 +1,24 @@
+{
+  "guard": {
+    "enabled": true,
+    "dshHost": "127.0.0.1",
+    "dshPort": 3080,
+    "pollMs": 3000
+  },
+  "pets": [
+    {
+      "name": "蓝毛小女仆",
+      "id": "main",
+      "size": 462,
+      "balanceEnabled": false,
+      "whisperEnabled": false,
+      "workStatusEnabled": false,
+      "display": "desktop",
+      "position": {
+        "corner": "bottom-right",
+        "marginX": 24,
+        "marginY": 100
+      }
+    }
+  ]
+}

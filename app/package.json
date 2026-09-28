@@ -1,0 +1,7 @@
+{
+  "name": "dsh-pet-standalone",
+  "version": "0.2.12",
+  "private": true,
+  "description": "dsh-pet standalone desktop pet — runs without DSH",
+  "main": "bootstrap.js"
+}
