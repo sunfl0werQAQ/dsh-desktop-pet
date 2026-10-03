@@ -216,12 +216,20 @@ function discoverDshPort(cfg, cb) {
 
   execFile('netstat', ['-ano', '-p', 'TCP'], { timeout: 5000, windowsHide: true }, function (err, stdout) {
     if (err || !stdout) { cb(null); return; }
+    // 必须排除「本地端自己的服务端口」：它也提供 /dsh-pet-7340/config，
+    // 不排除的话自动发现会探到自己、误判「DSH 可用」，于是本地端让位，
+    // 而万一 DSH 端其实没加载插件，就会两只桌宠都不显示。
+    const own = (function () {
+      try { return Number(new URL(process.env.DSH_PET_CONFIG_URL || '').port) || 0; } catch { return 0; }
+    })();
+    if (own) log('守卫：自动发现将跳过本地端自己的端口 ' + own);
+
     const cand = [];
     String(stdout).split(/\r?\n/).forEach(function (line) {
       const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING/i);
       if (!m) return;
       const p = normalizePort(m[1]);
-      if (p !== null && cfg.ports.indexOf(p) < 0 && cand.indexOf(p) < 0) cand.push(p);
+      if (p !== null && p !== own && cfg.ports.indexOf(p) < 0 && cand.indexOf(p) < 0) cand.push(p);
     });
     log('守卫：配置端口 ' + cfg.ports.join('/') + ' 均无活跃 DSH → 自动发现（本机监听端口 ' + cand.length + ' 个）');
 
