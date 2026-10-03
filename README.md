@@ -110,6 +110,49 @@ HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run  →  "<路径>\大肥鱼桌�
 
 用户级，不需要管理员权限。
 
+### ⚠️ 不要从 DSH 的终端里启动它
+
+这是一个**很容易踩、但很难自己想到**的坑。
+
+如果你在 **DSH 的终端**（或任何从 DSH 派生的 shell）里启动本程序，它会成为 **DSH 的子进程**。
+而 DSH 有自己的子进程管理（`@deepseek-ai/dsh-subprocess-local`），**退出时会清理它的后代进程** ——
+于是你**一关 DSH，桌宠就跟着消失了**，看起来像是程序自己崩了。
+
+（这种情况下日志里**不会有任何退出记录**，因为进程是被强杀的；`Get-Process` 也会发现它连残骸都不剩。）
+
+**验证自己有没有踩坑** —— 关掉 DSH，看桌宠是否还活着。正常应当 3 秒内从「让位隐藏」变成「显示接管」。
+
+要确认进程归属，可以打印祖先链，检查里面有没有 DSH：
+
+```powershell
+$p = (Get-Process -Name '大肥鱼桌宠' | Select-Object -First 1).Id
+$c = Get-CimInstance Win32_Process -Filter "ProcessId = $p"
+while ($c) {
+  "  $($c.Name)"
+  if (-not $c.ParentProcessId) { break }
+  $c = Get-CimInstance Win32_Process -Filter "ProcessId = $($c.ParentProcessId)" -ErrorAction SilentlyContinue
+}
+```
+
+正常的父链应当止于系统进程（`WmiPrvSE.exe` / `explorer.exe` → `svchost.exe` → `services.exe` → `wininit.exe`），
+**不应当出现 `node.exe` 或任何带 `dsh` 的进程**。
+
+**正确的启动方式**（父进程都是 `explorer.exe`，与 DSH 无关）：
+
+| 方式 | 说明 |
+|---|---|
+| 双击桌面快捷方式 | 推荐，最直观 |
+| 直接双击 exe | 同上 |
+| 开机自启（见上） | 由 Explorer 拉起，天然独立 |
+
+**如果确实需要从命令行启动**（写脚本、被别的程序调用等），用 WMI 绕开调用者的进程树：
+
+```powershell
+([wmiclass]'Win32_Process').Create('"C:\大肥鱼桌宠\大肥鱼桌宠.exe"')
+```
+
+这样它的父进程会是 `WmiPrvSE.exe`（系统服务），**关闭 DSH 不再影响它**。
+
 ## 配置
 
 `app/pets.json`：
