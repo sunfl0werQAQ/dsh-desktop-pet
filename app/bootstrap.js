@@ -23,6 +23,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
 
 const APP_DIR = __dirname;
 const ASSETS_DIR = path.join(APP_DIR, 'assets');
@@ -119,16 +120,33 @@ function readPetConfig() {
 // 的宠物时，才认为「DSH 那边真的会显示桌宠」。这样即使 DSH 开着但插件没装、
 // 或插件被设成只在浏览器显示，本地版依然会顶上，不会出现两边都没有桌宠的空档。
 
-const GUARD_DEFAULTS = { host: '127.0.0.1', port: 3080, pollMs: 3000 };
+// 端口来源优先级：guard.dshPorts 数组 > guard.dshPort 单值（旧配置，向后兼容）> 默认列表。
+// 默认列表覆盖两种常见 DSH：`npx dsh web`（3080）与桌面版（19387），
+// 于是两个 DSH 之间来回切换时本地端都能正确判定，不需要再手改配置。
+const GUARD_DEFAULTS = { host: '127.0.0.1', ports: [3080, 19387], pollMs: 3000 };
+
+function normalizePort(n) {
+  const v = Number(n);
+  return (Number.isInteger(v) && v > 0 && v < 65536) ? v : null;
+}
 
 function readGuardConfig() {
   let raw = {};
   try { raw = JSON.parse(fs.readFileSync(PETS_FILE, 'utf8')) || {}; } catch { /* 用默认 */ }
   const g = (raw.guard && typeof raw.guard === 'object') ? raw.guard : {};
+
+  let ports = [];
+  if (Array.isArray(g.dshPorts)) {
+    ports = g.dshPorts.map(normalizePort).filter(function (p) { return p !== null; });
+  } else if (normalizePort(g.dshPort)) {
+    ports = [normalizePort(g.dshPort)];
+  }
+  if (ports.length === 0) ports = GUARD_DEFAULTS.ports.slice();
+
   return {
     enabled: g.enabled !== false,
     host: (typeof g.dshHost === 'string' && g.dshHost) ? g.dshHost : GUARD_DEFAULTS.host,
-    port: Number(g.dshPort) > 0 ? Number(g.dshPort) : GUARD_DEFAULTS.port,
+    ports: ports,
     pollMs: Number(g.pollMs) >= 500 ? Number(g.pollMs) : GUARD_DEFAULTS.pollMs,
   };
 }
@@ -139,24 +157,25 @@ function readGuardConfig() {
  *   active = DSH 那边是否存在 display 为 desktop/both 的宠物（决定本地版是否让位）
  *   size   = 那些宠物的尺寸（用于本地端跟随同步；取不到为 null）
  */
-function probeDshPet(cfg, cb) {
+/** 探测单个端口的 pet 端点。reachable = 该端口确实有 HTTP 应答（用于区分「不是 DSH」和「没服务」） */
+function probeOnePort(host, port, cb, timeoutMs) {
   let settled = false;
   const finish = function (v) { if (!settled) { settled = true; cb(v); } };
   const req = http.get({
-    host: cfg.host,
-    port: cfg.port,
+    host: host,
+    port: port,
     path: PREFIX + '/config',
-    timeout: 1500,
+    timeout: timeoutMs > 0 ? timeoutMs : 1500,
     headers: { Accept: 'application/json' },
   }, function (res) {
     let body = '';
     res.setEncoding('utf8');
     res.on('data', function (c) {
       body += c;
-      if (body.length > 400000) { req.destroy(); finish({ active: false, size: null }); }
+      if (body.length > 400000) { req.destroy(); finish({ active: false, size: null, reachable: true }); }
     });
     res.on('end', function () {
-      if (res.statusCode !== 200) { finish({ active: false, size: null }); return; }
+      if (res.statusCode !== 200) { finish({ active: false, size: null, reachable: true }); return; }
       try {
         const j = JSON.parse(body);
         let active = false;
@@ -172,12 +191,103 @@ function probeDshPet(cfg, cb) {
             }
           });
         });
-        finish({ active: active, size: size });
-      } catch { finish({ active: false, size: null }); }
+        finish({ active: active, size: size, reachable: true });
+      } catch { finish({ active: false, size: null, reachable: true }); }
     });
   });
-  req.on('error', function () { finish({ active: false, size: null }); });
-  req.on('timeout', function () { req.destroy(); finish({ active: false, size: null }); });
+  req.on('error', function () { finish({ active: false, size: null, reachable: false }); });
+  req.on('timeout', function () { req.destroy(); finish({ active: false, size: null, reachable: false }); });
+}
+
+// 自动发现的限频（避免每次轮询都扫一遍）。发现的端口只记在内存里，
+// 不动用户的 pets.json —— 免得把配置写坏。
+let lastDiscoverAt = 0;
+const DISCOVER_COOLDOWN_MS = 60000;
+
+/**
+ * 兜底自动发现：配置里的端口都没找到活跃 DSH 时，用 netstat 列出本机所有 TCP
+ * 监听端口，逐个探测 pet 端点；找到就把端口加进 cfg.ports，本次运行后续轮询直接命中。
+ * 这样即使 DSH 换到 3080 / 19387 之外的端口（或同时开着多个），也不需要再手改配置。
+ */
+function discoverDshPort(cfg, cb) {
+  const now = Date.now();
+  if (now - lastDiscoverAt < DISCOVER_COOLDOWN_MS) { cb(null); return; }
+  lastDiscoverAt = now;
+
+  execFile('netstat', ['-ano', '-p', 'TCP'], { timeout: 5000, windowsHide: true }, function (err, stdout) {
+    if (err || !stdout) { cb(null); return; }
+    const cand = [];
+    String(stdout).split(/\r?\n/).forEach(function (line) {
+      const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING/i);
+      if (!m) return;
+      const p = normalizePort(m[1]);
+      if (p !== null && cfg.ports.indexOf(p) < 0 && cand.indexOf(p) < 0) cand.push(p);
+    });
+    log('守卫：配置端口 ' + cfg.ports.join('/') + ' 均无活跃 DSH → 自动发现（本机监听端口 ' + cand.length + ' 个）');
+
+    // 并发探测（同时 8 个），并用更短的超时：串行 36 个端口各等 1.5s 会让兜底拖到十几秒，
+    // 期间本地端会先冒出来再隐藏、闪一下。
+    const CONCURRENCY = 8;
+    const DISCOVER_TIMEOUT_MS = 700;
+    let next = 0;
+    let running = 0;
+    let done = false;
+    const finish = function (v) { if (!done) { done = true; cb(v); } };
+
+    function pump() {
+      if (done) return;
+      while (running < CONCURRENCY && next < cand.length) {
+        const port = cand[next++];
+        running++;
+        probeOnePort(cfg.host, port, function (r) {
+          running--;
+          if (done) return;
+          if (r.active) {
+            cfg.ports.push(port);
+            log('守卫：自动发现 DSH 在端口 ' + port + '（已加入本次运行的优先列表）');
+            finish({ active: true, size: r.size, port: port });
+            return;
+          }
+          pump();
+        }, DISCOVER_TIMEOUT_MS);
+      }
+      if (running === 0 && next >= cand.length) {
+        log('守卫：自动发现未找到 DSH');
+        finish(null);
+      }
+    }
+    pump();
+  });
+}
+
+/**
+ * 探测 DSH 的 pet 端点（多端口）。
+ * cb({ active, size })：
+ *   active = DSH 那边是否存在 display 为 desktop/both 的宠物（决定本地版是否让位）
+ *   size   = 那些宠物的尺寸（用于本地端跟随同步；取不到为 null）
+ */
+function probeDshPet(cfg, cb) {
+  const ports = cfg.ports.slice();
+  let idx = 0;
+  let bestSize = null;
+
+  function step() {
+    if (idx >= ports.length) {
+      // 配置里的端口都没活跃 DSH → 自动发现兜底
+      discoverDshPort(cfg, function (found) {
+        if (found) cb(found);
+        else cb({ active: false, size: bestSize });
+      });
+      return;
+    }
+    const port = ports[idx++];
+    probeOnePort(cfg.host, port, function (r) {
+      if (r.active) { cb({ active: true, size: r.size, port: port }); return; }
+      if (bestSize === null && r.size) bestSize = r.size;
+      step();
+    });
+  }
+  step();
 }
 
 /** 本地当前配置里第一只宠物的尺寸 */
@@ -269,7 +379,8 @@ function setupGuard() {
         const t = setInterval(function () { probeDshPet(cfg, apply); }, cfg.pollMs);
         if (t.unref) t.unref();
       }, 2000);
-      log('守卫已启用：每 ' + cfg.pollMs + 'ms 探测 ' + cfg.host + ':' + cfg.port + PREFIX + '/config');
+      log('守卫已启用：每 ' + cfg.pollMs + 'ms 探测 ' + cfg.host + ' 的端口 ' + cfg.ports.join('/')
+        + '（都不通时自动发现），路径 ' + PREFIX + '/config');
     });
   } catch (e) {
     log('守卫初始化失败:', e.message);
