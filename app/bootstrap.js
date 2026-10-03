@@ -579,6 +579,24 @@ const server = http.createServer(handle);
 server.on('error', function (e) { log('HTTP 服务错误:', e.message); });
 
 server.listen(0, '127.0.0.1', function () {
+  // ── 单实例锁 ────────────────────────────────────────────────────────────────
+  // 双击两次 exe 会跑出两个实例，屏幕上就会同时出现两只桌宠。用 Electron 自带的
+  // 具名锁避免：第二个实例拿不到锁就直接退出，并把已有实例的窗口叫到前面来。
+  const electronApi = require('electron');
+  if (!electronApi.app.requestSingleInstanceLock()) {
+    log('已有实例在运行 → 本次启动退出（避免出现两只桌宠）');
+    electronApi.app.exit(0);
+    return;
+  }
+  electronApi.app.on('second-instance', function () {
+    log('检测到重复启动 → 已忽略，并把已有窗口叫到前面');
+    try {
+      electronApi.BrowserWindow.getAllWindows().forEach(function (w) {
+        if (!w.isDestroyed()) { w.show(); w.focus(); }
+      });
+    } catch { /* 忽略 */ }
+  });
+
   const port = server.address().port;
   const configUrl = 'http://127.0.0.1:' + port + PREFIX + '/config';
   const pets = readPetConfig().map(function (p) {
