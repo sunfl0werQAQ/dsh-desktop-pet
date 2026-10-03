@@ -66,6 +66,19 @@
 判定条件不是「DSH 进程在不在」，而是「**DSH 那边是否真的会显示桌宠**」——
 所以即使 DSH 开着但插件没装、或被设成只在浏览器显示，本地端也会顶上，不会出现两边都空的空档。
 
+### 端口探测：多端口 + 自动发现
+
+DSH 的监听端口并不固定（`npx dsh web` 默认 **3080**，桌面版默认 **19387**）。
+守卫按三层顺序去找它，**你不需要手改配置**：
+
+1. **配置的端口列表** `guard.dshPorts`，默认 `[3080, 19387]` —— 命中即用，毫秒级；
+2. **自动发现**：列表里的端口都没有活跃 DSH 时，用 `netstat` 列出本机全部 TCP 监听端口，
+   并发探测每个端口的 pet 端点，找到就认（限频 60 秒一次，只记内存、不写回你的配置）；
+3. **记忆**：自动发现的端口会加入本次运行的优先列表，后续轮询直接命中。
+
+> 实测：把 `dshPorts` 故意配成不存在的 `[9999]`，仍能在 **9 ms** 内自动发现 3080 并正确让位，
+> 期间本地端不会闪现。
+
 关闭守卫：把 `app/pets.json` 里的 `guard.enabled` 设为 `false`。
 
 ## 运行方法
@@ -106,7 +119,7 @@ HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run  →  "<路径>\大肥鱼桌�
   "guard": {
     "enabled": true,
     "dshHost": "127.0.0.1",
-    "dshPort": 3080,
+    "dshPorts": [3080, 19387],
     "pollMs": 3000
   },
   "pets": [
@@ -122,6 +135,8 @@ HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run  →  "<路径>\大肥鱼桌�
 
 - `size`：宽度像素（高度自动按 9:16 计算）
 - `position.corner`：`top-left` / `top-right` / `bottom-left` / `bottom-right`
+- `guard.dshPorts`：要探测的 DSH 端口列表，默认 `[3080, 19387]`。
+  都探测不到时守卫会自动发现（见上节）。旧的单值写法 `"dshPort": 3080` 仍然有效，会被当作单元素列表。
 - 想同时显示多只：往 `pets` 数组里加项，`id` 不能重复
 
 动画池、播放权重、事件动画等进阶配置沿用上游格式（见 `app/assets/config.jsonc`）。
