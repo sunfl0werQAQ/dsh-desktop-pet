@@ -589,12 +589,10 @@ server.listen(0, '127.0.0.1', function () {
     return;
   }
   electronApi.app.on('second-instance', function () {
-    log('检测到重复启动 → 已忽略，并把已有窗口叫到前面');
-    try {
-      electronApi.BrowserWindow.getAllWindows().forEach(function (w) {
-        if (!w.isDestroyed()) { w.show(); w.focus(); }
-      });
-    } catch { /* 忽略 */ }
+    // 刻意「什么都不做」：窗口的显隐由守卫决定（DSH 可用时本地端必须让位）。
+    // 早先这里调用了 w.show()/focus()，结果重复启动会把已让位隐藏的窗口重新拽出来，
+    // 与 DSH 端同时显示 → 屏幕上出现两只桌宠。
+    log('检测到重复启动 → 已忽略（窗口显隐交由守卫决定，不强制显示）');
   });
 
   const port = server.address().port;
