@@ -57,6 +57,46 @@ function log() {
   }
 }
 
+// ── 自我脱离：不要成为 DSH 的子进程 ─────────────────────────────────────────
+// DSH 退出时会清理它的后代进程（@deepseek-ai/dsh-subprocess-local）。如果本进程是从
+// DSH 的终端（powershell / cmd / node）派生的，就先把自己用 WMI 重新拉起来、再让当前
+// 进程退出 —— WMI 创建的进程父级是系统服务 WmiPrvSE，与 DSH 再无关系，关掉 DSH 也
+// 不会把桌宠带走。
+// 父进程是 explorer.exe（双击 / 开机自启）或 WmiPrvSE.exe（已被本逻辑重启过）时说明
+// 本来就独立，直接继续 —— 这也天然避免了无限重启。
+function ensureDetached() {
+  let parentName = '';
+  try {
+    const out = require('node:child_process').execFileSync(
+      'tasklist', ['/FI', 'PID eq ' + process.ppid, '/FO', 'CSV', '/NH'],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 }
+    );
+    const m = String(out).match(/^"([^"]+)"/m);
+    if (m) parentName = m[1].toLowerCase();
+  } catch {
+    return true; // 查不到父进程就不折腾，按独立处理
+  }
+
+  if (!parentName || parentName === 'explorer.exe' || parentName === 'wmiprvse.exe') return true;
+
+  try {
+    // PowerShell 里用 WMI 创建进程：新进程的父级是 WmiPrvSE（系统服务），不再挂在 DSH 下
+    const psCmd = `([wmiclass]'Win32_Process').Create('"${process.execPath}"')`;
+    require('node:child_process').execFileSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+      { windowsHide: true, timeout: 20000 }
+    );
+    log('父进程是 ' + parentName + '（可能随 DSH 一起被清理）→ 已用 WMI 重新拉起自己，本进程退出');
+    return false;
+  } catch (e) {
+    log('自我脱离失败（继续以当前方式运行）:', e.message);
+    return true;
+  }
+}
+
+if (!ensureDetached()) process.exit(0);
+
 // ── JSONC → JSON（config.jsonc 带 // 与块注释、尾随逗号，JSON.parse 读不了）──
 function parseJsonc(text) {
   const src = text.replace(/^\uFEFF/, '');
