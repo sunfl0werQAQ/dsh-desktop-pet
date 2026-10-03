@@ -1,4 +1,4 @@
-<#
+﻿<#
     大肥鱼桌宠 · 本地端 —— 一键组装脚本
     ------------------------------------------------------------------
     做三件事：
@@ -27,7 +27,11 @@ Write-Host "Electron $Version (win32-x64)" -ForegroundColor DarkGray
 Write-Host ''
 
 # ── 1. 下载（已有运行时则跳过）────────────────────────────────
-if (Test-Path (Join-Path $Runtime 'electron.exe')) {
+$ExistingExe = @(
+    (Join-Path $Runtime 'electron.exe'),
+    (Join-Path $Runtime '大肥鱼桌宠.exe')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($ExistingExe -and (Test-Path (Join-Path $Runtime 'resources\app\bootstrap.js'))) {
     Write-Host '[1/4] 检测到已有 runtime/，跳过下载' -ForegroundColor Yellow
 } else {
     Write-Host "[1/4] 下载 Electron ..."
@@ -57,6 +61,7 @@ Write-Host '[4/4] 重命名入口 ...'
 $Exe = Join-Path $Runtime 'electron.exe'
 $New = Join-Path $Runtime '大肥鱼桌宠.exe'
 if (Test-Path $Exe) { Rename-Item $Exe $New -Force }
+elseif ($ExistingExe) { $New = $ExistingExe }
 Write-Host '      完成' -ForegroundColor Green
 
 Write-Host ''
