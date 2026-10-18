@@ -566,6 +566,47 @@ function handle(req, res) {
   sendJson(res, { error: 'not found: ' + rest }, 404);
 }
 
+// ── 开机自启（读写 HKCU\...\Run）─────────────────────────────────────────────
+// 只操作当前用户的 Run 键，不需要管理员权限。
+const AUTOSTART_KEY = 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run';
+const AUTOSTART_NAME = '大肥鱼桌宠';
+
+function isAutostartEnabled() {
+  try {
+    require('node:child_process').execFileSync(
+      'reg', ['query', AUTOSTART_KEY, '/v', AUTOSTART_NAME],
+      { windowsHide: true, timeout: 5000, stdio: 'ignore' }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAutostart(on) {
+  const cp = require('node:child_process');
+  try {
+    if (on) {
+      const exe = process.execPath;
+      cp.execFileSync(
+        'reg', ['add', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/t', 'REG_SZ', '/d', '"' + exe + '"', '/f'],
+        { windowsHide: true, timeout: 5000, stdio: 'ignore' }
+      );
+      log('开机自启：已启用 → ' + exe);
+    } else {
+      cp.execFileSync(
+        'reg', ['delete', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/f'],
+        { windowsHide: true, timeout: 5000, stdio: 'ignore' }
+      );
+      log('开机自启：已关闭');
+    }
+    return true;
+  } catch (e) {
+    log('开机自启设置失败:', e.message);
+    return false;
+  }
+}
+
 // ── 系统托盘 ───────────────────────────────────────────────────────────────
 // 脱离 DSH 后没有任何宿主会来关闭桌宠，必须自带一个可见的退出入口。
 function setupTray() {
@@ -601,6 +642,15 @@ function setupTray() {
             },
           },
           { label: '打开日志', click: function () { shell.openPath(LOG_FILE); } },
+          {
+            label: '开机自启动',
+            type: 'checkbox',
+            checked: isAutostartEnabled(),
+            click: function (item) {
+              setAutostart(item.checked);
+              rebuild();
+            },
+          },
           { type: 'separator' },
           { label: '退出', click: function () { app.exit(0); } },
         ]));
